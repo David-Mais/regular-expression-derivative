@@ -13,7 +13,7 @@ let alt r1 r2 = match r1, r2 with
   | Empty, r | r, Empty -> r
   | _ -> if r1 = r2 then r1 else Alt (r1,r2)
 
-let and r1 r2 = match r1, r2 with
+let and_ r1 r2 = match r1, r2 with
   | Empty, _ | _, Empty -> Empty
   | _ -> if r1 = r2 then r1 else And (r1, r2)
 
@@ -43,13 +43,17 @@ let rec derive r c = match r with
   | Epsilon -> Empty
   | Char d -> if d = c then Epsilon else Empty
   | Alt (r1,r2) -> alt (derive r1 c) (derive r2 c)
-  | And (r1, r2) -> and (derive r1 c) (derive r2 c)
+  | And (r1, r2) -> and_ (derive r1 c) (derive r2 c)
   | Seq (r1,r2) ->
       if nullable r1 then
         alt (seq (derive r1 c) r2) (derive r2 c)
       else
         seq (derive r1 c) r2
   | Star r' -> seq (derive r' c) (Star r')
+
+(* Derivative of a regex w.r.t. string s *)
+let derive_string r s =
+  String.fold_left derive r s
 
 (* Test membership: does regex r accept string s? *)
 let matches r s =
