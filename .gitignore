@@ -1,0 +1,93 @@
+# Compiled source files
+*.cm*
+*.o
+*.a
+*.so
+*.dll
+*.exe
+*.obj
+*.annot
+*.byte
+*.native
+*.opt
+*.run
+
+# Dune build artifacts
+_build/
+.dune/
+.dune-incdirs/
+.install/
+*.install
+*.d
+
+# Jbuilder (legacy)
+_jbuild/
+
+# OPAM switch local files
+.opam/
+.opam-switch/
+
+# Merlin (OCaml IDE tool)
+.merlin
+.merlin-expect
+
+# OCamlfind
+*.cmxa
+*.cmi
+*.cmo
+*.cma
+*.cmx
+
+# Editor/IDE files
+*.swp
+*.swo
+*~
+*.bak
+*.tmp
+*.DS_Store
+*.directory
+*.orig
+
+# VSCode
+.vscode/
+
+# Emacs
+*#
+.#*
+
+# MacOS-specific
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows-specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Logs
+*.log
+
+# OCaml LSP server temp dirs
+ocaml-lsp-server.log
+.ocamlformat*
+
+# Esy and ReScript (if used)
+_esy/
+node_modules/
+*.bs.js
+
+# Test and coverage tools
+coverage/
+*.coverage
+*.ppx
+
+# BuckleScript/ReasonML
+lib/bs
+lib/ocaml
+*.bs.js
+
+# OPAM backup files
+*.opam.locked
+
