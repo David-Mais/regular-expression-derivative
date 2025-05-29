@@ -4,6 +4,7 @@ type regex =
   | Epsilon                  (* matches the empty string "" *)
   | Char of char             (* matches one specific character *)
   | Alt of regex * regex     (* r1 | r2 *)
+  | And of regex * regex     (* r1 & r2 *)
   | Seq of regex * regex     (* r1 r2 *)
   | Star of regex            (* r* *)
 
@@ -11,6 +12,10 @@ type regex =
 let alt r1 r2 = match r1, r2 with
   | Empty, r | r, Empty -> r
   | _ -> if r1 = r2 then r1 else Alt (r1,r2)
+
+let and r1 r2 = match r1, r2 with
+  | Empty, _ | _, Empty -> Empty
+  | _ -> if r1 = r2 then r1 else And (r1, r2)
 
 let seq r1 r2 = match r1, r2 with
   | Empty, _ | _, Empty -> Empty
@@ -28,6 +33,7 @@ let rec nullable = function
   | Epsilon -> true
   | Char _ -> false
   | Alt (r1,r2) -> nullable r1 || nullable r2
+  | And (r1, r2) -> nullable r1 && nullable r2
   | Seq (r1,r2) -> nullable r1 && nullable r2
   | Star _ -> true
 
@@ -37,6 +43,7 @@ let rec derive r c = match r with
   | Epsilon -> Empty
   | Char d -> if d = c then Epsilon else Empty
   | Alt (r1,r2) -> alt (derive r1 c) (derive r2 c)
+  | And (r1, r2) -> and (derive r1 c) (derive r2 c)
   | Seq (r1,r2) ->
       if nullable r1 then
         alt (seq (derive r1 c) r2) (derive r2 c)
@@ -79,6 +86,7 @@ let rec show_regex = function
   | Epsilon      -> "ε"
   | Char c       -> Printf.sprintf "%c" c
   | Alt (r1, r2) -> Printf.sprintf "%s|%s" (show_regex r1) (show_regex r2)
+  | And (r1, r2) -> Printf.sprintf "%s&%s" (show_regex r1) (show_regex r2)
   | Seq (r1, r2) -> Printf.sprintf "%s%s"  (show_regex r1) (show_regex r2)
   | Star r       -> Printf.sprintf "(%s)*" (show_regex r)
 
