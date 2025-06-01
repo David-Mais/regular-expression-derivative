@@ -62,27 +62,44 @@ let matches r s =
 
 (* Enumerate language up to length n (may be infinite for stars!) *)
 let generate r max_len =
-  let rec aux current_len words =
-    if current_len > max_len then []
+  let alphabet = List.init 256 Char.chr in
+
+  let rec bfs current_len list_of_pairs acc_words =
+    let acc_words' =
+      if current_len = 0 then
+        if nullable r then "" :: acc_words else acc_words
+      else
+        List.fold_left
+          (fun acc (w, dreg) ->
+            if nullable dreg then w :: acc else acc)
+          acc_words
+          list_of_pairs
+    in
+
+    if current_len = max_len then
+      acc_words'
     else
-      let rec extend prefix = function
-        | [] -> [prefix]
-        | cs ->
-          List.concat_map (fun c ->
-            let d = derive r c in
-            if nullable d then [prefix ^ String.make 1 c] else []
-          ) cs
+      let next_pairs =
+        List.concat (
+          List.map
+            (fun (w, dreg) ->
+              List.fold_left
+                (fun acc c ->
+                  let d' = derive dreg c in
+                  if d' <> Empty then
+                    (w ^ String.make 1 c, d') :: acc
+                  else
+                    acc)
+                []
+                alphabet
+            )
+            list_of_pairs
+        )
       in
-      let candidates =
-        if current_len = 0 then
-          if nullable r then [""] else []
-        else
-          List.concat_map (fun w -> extend w (List.init 256 Char.chr))
-            (aux (current_len - 1) words)
-      in
-      words @ candidates
+      bfs (current_len + 1) next_pairs acc_words'
   in
-  aux 0 []
+
+  bfs 0 [("", r)] []
 
 (* Convert regex AST to a string for display *)
 let rec show_regex = function
