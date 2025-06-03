@@ -117,7 +117,7 @@ let pp_regex fmt r =
 
 
 (*----------------------------------------------------------------*)
-(* === 1. Global similarity table === *)
+(* === Global similarity table === *)
 
 (* We keep one global Hashtbl mapping (char * char) -> float,
    storing a number in [0.0; 1.0] that measures how “close” two chars are. *)
@@ -189,7 +189,7 @@ let rec fuzzy_derive (r : regex) (c : char) (threshold : float) : regex =
       seq (fuzzy_derive r' c threshold) (Star r')
 
 (*----------------------------------------------------------------*)
-(* 3. “Fuzzy” derive‐over‐a‐string and “fuzzy” matches *)
+(* “Fuzzy” derive‐over‐a‐string and “fuzzy” matches *)
 
 (* Walk through the string, taking a fuzzy derivative at each step. *)
 let fuzzy_derive_string (r : regex) (s : string) (threshold : float) : regex =
