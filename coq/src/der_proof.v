@@ -45,7 +45,7 @@ Definition neg(r1 : regex) : regex :=
   match r1 with
   | Neg r => r
   | Alt r r' => and_ (Neg r) (Neg r')
-  | And r r' => alt (Neg r) (r')
+  | And r r' => alt (Neg r) (Neg r')
   | _ => Neg r1
   end.
 
