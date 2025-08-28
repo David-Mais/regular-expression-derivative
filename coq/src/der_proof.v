@@ -1,32 +1,35 @@
-Require Import Ascii.
-Require Import List.
+From Coq Require Import Ascii List Bool.
 Import ListNotations.
-Require Import Bool.
 
-Definition string := list ascii.
+(* A word is a finite list of symbols from Σ (here: ASCII) *)
+Definition word := list ascii.
 
 Inductive regex : Type :=
-| Empty : regex
-| Epsilon : regex
-| Char : ascii -> regex
-| Alt : regex -> regex -> regex
-| And : regex -> regex -> regex
-| Seq : regex -> regex -> regex
-| Star : regex -> regex
-| Neg : regex -> regex.
+| Empty   : regex                      (* ∅ : empty language *)
+| Epsilon : regex                      (* ε : language {ε} *)
+| Char    : ascii -> regex             (* a ∈ Σ : singleton {a} *)
+| Alt     : regex -> regex -> regex    (* r + s : union *)
+| And     : regex -> regex -> regex    (* r & s : intersection *)
+| Seq     : regex -> regex -> regex    (* r · s : concatenation *)
+| Star    : regex -> regex             (* r* : Kleene star *)
+| Neg     : regex -> regex.            (* ¬r : complement *)
 
+(* Union: ∅ is neutral (∅ + r = r). Otherwise keep Alt. *)
 Definition alt (r1 r2 : regex) : regex :=
   match r1, r2 with
   | Empty, r | r, Empty => r
   | _, _ => Alt r1 r2
   end.
 
+
+(* Intersection: ∅ is absorbing (∅ & r = ∅). Otherwise keep And. *)
 Definition and_ (r1 r2 : regex) : regex :=
   match r1, r2 with
   | Empty, _ | _, Empty => Empty
   | _, _ => And r1 r2
   end.
 
+(* Concatenation: ∅ is absorbing; ε is neutral (ε·r = r = r·ε). *)
 Definition cat (r1 r2 : regex) : regex :=
   match r1, r2 with
   | Empty, _ | _, Empty => Empty
@@ -34,417 +37,312 @@ Definition cat (r1 r2 : regex) : regex :=
   | _, _ => Seq r1 r2
   end.
 
-Definition star (r1 : regex) : regex :=
-  match r1 with
+(* Star: ∅* = ε and ε* = ε; collapse nested stars. *)
+Definition star (r : regex) : regex :=
+  match r with
   | Empty | Epsilon => Epsilon
-  | Star r => Star r
-  | _ => Star r1
+  | Star r' => Star r'
+  | _ => Star r
   end.
 
-Definition neg(r1 : regex) : regex :=
-  match r1 with
-  | Neg r => r
-  | Alt r r' => and_ (Neg r) (Neg r')
-  | And r r' => alt (Neg r) (Neg r')
-  | _ => Neg r1
+(* Complement: push negation using De Morgan; eliminate double negation. *) 
+Definition neg(r : regex) : regex :=
+  match r with
+  | Neg r' => r'
+  | Alt r1 r2 => and_ (Neg r1) (Neg r2)
+  | And r1 r2 => alt (Neg r1) (Neg r2)
+  | _ => Neg r
   end.
 
 Fixpoint nullable (r : regex) : bool :=
   match r with
-  | Empty => false
-  | Epsilon => true
-  | Char _ => false
-  | Alt r1 r2 => nullable r1 || nullable r2
-  | And r1 r2 => nullable r1 && nullable r2
-  | Seq r1 r2 => nullable r1 && nullable r2
-  | Star _ => true
-  | Neg r1 => negb (nullable r1)
+  | Empty        => false                      (* ε ∉ ∅ *)
+  | Epsilon      => true                       (* ε ∈ {ε} *)
+  | Char _       => false                      (* ε ∉ {a} *)
+  | Alt r1 r2    => nullable r1 || nullable r2 (* ε ∈ L(r1) ∪ L(r2) *)
+  | And r1 r2    => nullable r1 && nullable r2 (* ε ∈ L(r1) ∩ L(r2) *)
+  | Seq r1 r2    => nullable r1 && nullable r2 (* ε ∈ L(r1)·L(r2) *)
+  | Star _       => true                       (* ε ∈ L((r)*)
+  | Neg r1       => negb (nullable r1)         (* ε ∈ ¬L(r) iff ε ∉ L(r) *)
   end.
 
+(* Regex-valued ν(r): (returns ε or ∅)*)
+Definition nu (r : regex) : regex :=
+  if nullable r then Epsilon else Empty.
 
-(* Languages *)
 
-Definition language := string -> Prop.
+(* ------------------------------------------------------------------ *)
+(* Semantics of regular expressions                                    *)
+(* ------------------------------------------------------------------ *)
 
-Inductive kstar (L : language) : language :=
-| ks_eps : kstar L []
-| ks_app : forall u v, L u -> kstar L v -> kstar L (u ++ v).
+(* A language over Σ is represented as a membership predicate on words. *)
+Definition language := word -> Prop.
 
-(*language denoted by some regex*)
-Fixpoint denote (r : regex) : language :=
+(* Inductive (least) definition of Kleene star for an arbitrary language L.
+   - star_nil: ε is in L*.
+   - star_app: if u ∈ L and v ∈ L* then u ++ v ∈ L*.
+   Here "++" is list (word) concatenation. *)
+Inductive star_lang (L : language) : language :=
+| star_nil  : star_lang L []
+| star_app  : forall u v, L u -> star_lang L v -> star_lang L (u ++ v).
+
+(*Lang maps a regex to its language, i.e. a predicate that, 
+given a word, says whether that word is denoted by the regex.*)
+Fixpoint Lang (r : regex) : language :=
   match r with
-  | Empty      => fun _ => False
-  | Epsilon    => fun w => w = []
-  | Char a     => fun w => w = [a]
-  | Alt r1 r2  => fun w => denote r1 w \/ denote r2 w
-  | And r1 r2  => fun w => denote r1 w /\ denote r2 w
-  | Seq r1 r2  => fun w => exists u v, w = u ++ v /\ denote r1 u /\ denote r2 v
-  | Star r1    => kstar (denote r1)
-  | Neg r1     => fun w => ~ denote r1 w
+  | Empty     =>
+      (* ∅ : no word is a member *)
+      fun _ => False
+  | Epsilon   =>
+      (* {ε} : only the empty word is a member *)
+      fun w => w = []
+  | Char a    =>
+      (* {a} : only the one-symbol word [a] is a member *)
+      fun w => w = [a]
+  | Alt r s   =>
+      (* r + s : union of languages *)
+      fun w => Lang r w \/ Lang s w
+  | And r s   =>
+      (* r & s : intersection of languages *)
+      fun w => Lang r w /\ Lang s w
+  | Seq r s   =>
+      (* r · s : concatenation; w splits as u ++ v with u ∈ Lang r and v ∈ Lang s *)
+      fun w => exists u v, w = u ++ v /\ Lang r u /\ Lang s v
+  | Star r    =>
+      (* r* : Kleene star of Lang r *)
+      star_lang (Lang r)
+  | Neg r     =>
+      (* ¬r : complement of Lang r (relative to all words) *)
+      fun w => ~ Lang r w
   end.
 
-Notation "⟦ r ⟧" := (denote r) (at level 9).
+(* ------------------------------------------------------------------ *)
+(* Derivative on languages - Semantic                                 *)
+(* ------------------------------------------------------------------ *)
 
-(** Regular languages: denoted by some regex *)
-Definition regular (L : language) : Prop :=
-  exists r, forall w, L w <-> ⟦r⟧ w.
-
-
-(** * Semantic derivatives (languages) *)
-(*derivative of a language with respect to a symbol*)
-Definition dlang_sym (a : ascii) (L : language) : language :=
+(*Semantic derivative with respect to a single character*)
+Definition dlang_char (a : ascii) (L : language) : language :=
   fun w => L (a :: w).
 
-Fixpoint dlang_word (u : string) (L : language) : language :=
+(*Semantic derivative with respect to a word*)
+Fixpoint dlang (u : word) (L : language) : language :=
   match u with
-  | [] => L
-  | a :: v => dlang_word v (dlang_sym a L)
+  | []     => L
+  | a :: v => dlang v (dlang_char a L)
   end.
 
+(* ------------------------------------------------------------------ *)
+(* Derivative on regex - Syntactic                                    *)
+(* ------------------------------------------------------------------ *)
 
-(** derivative of a language with respect to string u without recursion *)
-Definition dlang_word_concat (u : string) (L : language) : language :=
-  fun w => L (u ++ w).
+Definition ascii_eq_dec := Ascii.ascii_dec.
 
-(** Proving that last two definitions are the same *)
-Lemma dlang_equiv :
-  forall u L w, dlang_word u L w <-> dlang_word_concat u L w.
-Proof.
-  induction u as [|a v IHv]; cbn; intro L; intro w.
-  - tauto.
-  - rewrite IHv. reflexivity.
-Qed.
-
-(*** ------------------------------------------------------------- ***)
-(** * Nullable correctness (boolean-to-Prop bridge) *)
-
-(* Lemma orb_true_iff : forall b1 b2, b1 || b2 = true <-> b1 = true \/ b2 = true.
-Proof. destruct b1, b2; simpl; tauto. Qed.
-
-Lemma andb_true_iff : forall b1 b2, b1 && b2 = true <-> b1 = true /\ b2 = true.
-Proof. destruct b1, b2; simpl; tauto. Qed.
-
-Lemma negb_true_iff : forall b, negb b = true <-> b = false.
-Proof. destruct b; simpl; tauto. Qed.
-
-Lemma nullable_correct : forall r, nullable r = true <-> ⟦r⟧ [].
-Proof.
-  induction r; simpl.
-  - split; intros H; [discriminate|contradiction].
-  - split; intros _; reflexivity.
-  - split; intros H; [discriminate|].
-    intros Hc. inversion Hc.
-  - rewrite orb_true_iff, IHr1, IHr2. tauto.
-  - rewrite andb_true_iff, IHr1, IHr2. tauto.
-  - rewrite andb_true_iff, IHr1, IHr2. tauto.
-  - split; intros _; constructor.
-  - rewrite negb_true_iff, IHr. split.
-    + intros Hb Hden. rewrite <- Hb in Hden. simpl in Hden. contradiction.
-    + intros Hn. destruct (nullable r); [exfalso|reflexivity].
-      apply IHr in eq_refl. contradiction.
-Qed.
-
-Lemma nullable_false_iff : forall r, nullable r = false <-> ~ ⟦r⟧ [].
-Proof.
-  intro r. rewrite <- Bool.not_true_iff_false, nullable_correct. tauto.
-Qed. *)
-
-(*** ------------------------------------------------------------- ***)
-(** * Brzozowski derivative (syntactic) *)
-
-Require Import Ascii.
-Definition ascii_eq_dec := ascii_dec.
-
-Fixpoint deriv_sym (a : ascii) (r : regex) : regex :=
+(*Syntactic derivative with respect to a single character*)
+Fixpoint D_char (a : ascii) (r : regex) : regex :=
   match r with
-  | Empty      => Empty
-  | Epsilon    => Empty
-  | Char b     => if ascii_eq_dec a b then Epsilon else Empty
-  | Alt r1 r2  => alt (deriv_sym a r1) (deriv_sym a r2)
-  | And r1 r2  => and_ (deriv_sym a r1) (deriv_sym a r2)
-  | Seq r1 r2  =>
-      alt (cat (deriv_sym a r1) r2)
-          (if nullable r1 then deriv_sym a r2 else Empty)
-  | Star r1    => cat (deriv_sym a r1) (Star r1)
-  | Neg r1     => neg (deriv_sym a r1)
+  | Empty      => Empty   (* D_a(∅) = ∅ : no word in ∅ starts with a *)
+  | Epsilon    => Empty   (* D_a({ε}) = ∅ : ε does not start with a *)
+  | Char c     => if ascii_eq_dec a c then Epsilon else Empty    (* D_a({c}) = {ε} if a = c, else ∅ *)
+  | Alt r s    => Alt (D_char a r) (D_char a s)    (* D_a(r + s) = D_a(r) + D_a(s) : derivative distributes over union *)
+  | And r s    => And (D_char a r) (D_char a s)    (* D_a(r & s) = D_a(r) & D_a(s) : derivative distributes over intersection *)
+  | Seq r s    => Alt (Seq (D_char a r) s) (Seq (nu r) (D_char a s)) 
+      (* Concatenation rule:
+         D_a(r · s) = D_a(r) · s  +  ν(r) · D_a(s)
+         - First term: a is consumed by the left factor r, remainder must still match s.
+         - Second term: if r is nullable (ν(r)=ε), a can be consumed by s. *)
+  | Star r     => Seq (D_char a r) (Star r)     (* D_a(r* = D_a(r) · r* : first block comes from r, rest stays in r* *)
+  | Neg r      => Neg (D_char a r)       (* D_a(¬r) = ¬(D_a(r)) : complement commutes with left quotient *)
   end.
 
-Fixpoint deriv_word (u : string) (r : regex) : regex :=
+(*Syntactic derivative with respect to a word*)
+Fixpoint D (u : word) (r : regex) : regex :=
   match u with
-  | [] => r
-  | a :: v => deriv_word v (deriv_sym a r)
+  | []     => r
+  | a :: v => D v (D_char a r)
   end.
 
-(*** ------------------------------------------------------------- ***)
-(** * List/Kleene-star lemmas used in correctness proof *)
+(* ------------------------------------------------------------------ *)
+(* Nullability correctness                                              *)
+(* ------------------------------------------------------------------ *)
 
-
-Require Import List.
-Import ListNotations.
-
-Lemma kstar_cons_decomp :
-  forall (L : language) a w,
-    kstar L (a :: w) ->
-    exists u v, u <> [] /\ L u /\ kstar L v /\ a :: w = u ++ v.
-(* Proof.
-  intros L a w H.
-  (* Remember z = a :: w so we can generalize a, w, and the equation
-     before we do induction on H. *)
-  remember (a :: w) as z eqn:Hz.
-  revert a w Hz.
-  (* Induct on the derivation H : kstar L z *)
-  induction H as [|u v Hu Hkv IH]; intros a w Hz.
-  - (* ks_eps: kstar L [] *) discriminate Hz.
-  - (* ks_app: H = ks_app u v Hu Hkv, so z = u ++ v *)
-    (* split on whether the first chunk u is empty *)
-    destruct u as [|x xs].
-    + (* u = []: then z = [] ++ v, i.e., z = v *)
-      simpl in Hz. rewrite app_nil_l in Hz.  (* so Hz: a :: w = v *)
-      (* apply IH to the tail v *)
-      specialize (IH a w Hz).
-      destruct IH as (u' & v' & Hnz & Hu' & Hv' & Heq).
-      now eexists; eexists; repeat (split; eauto).
-    + (* u = x :: xs: nonempty first chunk *)
-      exists (x :: xs), v.
-      repeat split; eauto.
-      * discriminate.             (* u <> [] *)
-      * exact Hz.                  (* a :: w = (x :: xs) ++ v *)
-Qed. *)
-
-
-
-
-
-
-
-Lemma denote_alt : forall r1 r2 w,
-  ⟦alt r1 r2⟧ w <-> (⟦r1⟧ w \/ ⟦r2⟧ w).
+(* nullable_correct: the boolean test nullable r is true exactly when r accepts ε
+   (i.e., Lang r [] holds). 
+   so when nullable r is true language denoted by r contains the empty word *)
+Lemma nullable_correct : forall r, nullable r = true <-> Lang r [].
 Proof.
-  intros r1 r2 w. unfold alt.
-  destruct r1; destruct r2; simpl; tauto.
-Qed.
-
-Lemma denote_and_ : forall r1 r2 w,
-  ⟦and_ r1 r2⟧ w <-> (⟦r1⟧ w /\ ⟦r2⟧ w).
-Proof.
-  intros r1 r2 w. unfold and_.
-  destruct r1; destruct r2; simpl; tauto.
-Qed.
-
-
-Lemma eps_left :
-  forall (r : regex) (w : string),
-    ⟦r⟧ w <-> (exists u v, w = u ++ v /\ ⟦Epsilon⟧ u /\ ⟦r⟧ v).
-Proof.
-  intros r w; split.
-  - (* -> *)
-    intro H. exists [], w. repeat split; try reflexivity; exact H.
-  - (* <- *)
-    intros (u & v & Hw & Hu & Hv).
-    simpl in Hu.                    (* ⟦Epsilon⟧ u  is  u = [] *)
-    subst u.                        (* replace u by [] *)
-    rewrite app_nil_l in Hw.        (* w = [] ++ v  ⇒  w = v *)
-    subst w. exact Hv.
-Qed.
-
-Lemma eps_right :
-  forall (r : regex) (w : string),
-    ⟦r⟧ w <-> (exists u v, w = u ++ v /\ ⟦r⟧ u /\ ⟦Epsilon⟧ v).
-Proof.
-  intros r w; split.
-  - (* -> *)
-    intro H.
-    exists w, [].
-    (* we must build w = w ++ [], ⟦r⟧ w, and ⟦Epsilon⟧ [] *)
-    repeat split.
-    + now rewrite app_nil_r.
-    + exact H.
-    + reflexivity.    (* since ⟦Epsilon⟧ v means v = [] *)
-  - (* <- *)
-    intros (u & v & Hw & Hu & Hv).
-    simpl in Hv.      (* Hv : v = [] *)
-    subst v.
-    rewrite app_nil_r in Hw.
-    subst w.
-    exact Hu.
-Qed.
-
-
-
-Lemma denote_cat :
-  forall r1 r2 w,
-    ⟦cat r1 r2⟧ w <-> (exists u v, w = u ++ v /\ ⟦r1⟧ u /\ ⟦r2⟧ v).
-Proof.
-  intros r1 r2 w. unfold cat.
-  destruct r1; destruct r2; simpl.
-
-  (* Any branch where cat reduces to Empty: left side is False *)
-  all: try (split; intro H;
-            [ contradiction
-            | destruct H as [u [v [_ [Hu _]]]]; exact Hu ]).
-
-  (* Left Epsilon (and right not Empty): use eps_left *)
-  all: try (apply eps_left).
-
-  (* Right Epsilon (and left not Empty): use eps_right *)
-  all: try (apply eps_right).
-
-  (* Remaining branches: cat left as Seq r1 r2; both sides identical by ⟦Seq⟧ def *)
-  all: apply iff_refl.
-Qed.
-
-
-
-
-
-(*** ------------------------------------------------------------- ***)
-(** * Semantic–syntactic correspondence for one symbol *)
-
-Theorem deriv_sym_correct :
-  forall (r : regex) (sym : ascii) (w : string),
-    ⟦deriv_sym sym r⟧ w <-> ⟦r⟧ (sym :: w).
-Proof.
-  intros r sym w; revert sym w.
-  induction r as
-    [ (* Empty *)
-    | (* Epsilon *)
-    | b
-    | r1 IH1 r2 IH2
-    | r1 IH1 r2 IH2
-    | r1 IH1 r2 IH2
-    | r1 IH1
-    | r1 IH1
-    ]; intros sym w; simpl.
-  - tauto.
-  - simpl; split; [tauto | now intros Heq; discriminate].
-  (* Char b *)
-  - destruct (ascii_eq_dec sym b) as [->|Hb]; simpl; split; intro H.
-  (* sym = b, -> direction: w = [] -> b :: w = [b] *)
-    now subst.
-  (* sym = b, <- direction: b :: w = [b] -> w = [] *)
-    now inversion H.
-  (* sym <> b, -> direction: False -> sym :: w = [b] *)
-    contradiction.
-  (* sym <> b, <- direction: sym :: w = [b] -> False *)
-    inversion H; congruence.
+  induction r; simpl. (*divide iff into two goals*)
+  (*r = Empyy | nullable Empty = true -> Lang Empty [], false = true, discriminate solves impossible equalities
+  Lang Empty [] is False. and inversion closes contradictions| *)
+  - split; [discriminate | intro H; inversion H].
+  (*r = Epsilon, trivial true = true*)
+  - split; [reflexivity | intro H; now subst].
+  (*r = Char _*)
+  - split; [discriminate | intro H; inversion H].
   - (* Alt *)
-    rewrite denote_alt. simpl. rewrite IH1, IH2. tauto.
+    rewrite Bool.orb_true_iff.
+    split.
+    + intros [H|H]; [left; apply IHr1 in H | right; apply IHr2 in H]; assumption.
+    + intros [Hr|Hs]; [left; apply (proj2 IHr1) in Hr | right; apply (proj2 IHr2) in Hs]; assumption.
   - (* And *)
-    rewrite denote_and_. simpl. rewrite IH1, IH2. tauto.
+    rewrite Bool.andb_true_iff.
+    split.
+    + intros [H1 H2]; split; [apply IHr1 in H1 | apply IHr2 in H2]; assumption.
+    + intros [Hr Hs]; split; [apply (proj2 IHr1) in Hr | apply (proj2 IHr2) in Hs]; assumption.
   - (* Seq *)
-    rewrite denote_alt. simpl.
+    rewrite Bool.andb_true_iff.
+    split.
+    + intros [H1 H2].
+      apply IHr1 in H1. apply IHr2 in H2.
+      exists [], []; repeat split; auto.
+    + intros [u [v [Huv [Hu Hv]]]].
+      symmetry in Huv.
+      apply app_eq_nil in Huv as [-> ->].
+      split; [apply (proj2 IHr1) in Hu | apply (proj2 IHr2) in Hv]; assumption.
+    - (* Star *)
+    split.
+    + intros _. constructor.
+    + intros _. reflexivity.
+  - (* Neg *)
+    rewrite Bool.negb_true_iff.
+    split.
+    + intros Hneg Hr. apply (proj2 IHr) in Hr. now rewrite Hr in Hneg.
+    + intro Hnot. destruct (nullable r) eqn:E.
+      * exfalso. apply Hnot. apply (proj1 IHr). reflexivity. 
+      * reflexivity.
+Qed.
+
+
+
+(* ------------------------------------------------------------------ *)
+(* Correctness of derivatives                                          *)
+(* ------------------------------------------------------------------ *)
+
+(* star_cons_split:
+   If a word s is in L* (star_lang L s) and s starts with the letter a
+   (so s = a :: w), then we can "peel" that leading a into the first block
+   coming from L. Concretely, there exist u and v such that:
+     w = u ++ v,
+     L (a :: u)          (the first block from L begins with that a),
+     star_lang L v.      (the remainder stays in L-star).
+   Intuition: a proof that s ∈ L* is built by concatenating blocks u₁,u₂,… ∈ L.
+   If u₁ is empty, skip it and look at the tail; if u₁ = a::u, then we’re done. *)
+
+Lemma star_cons_split :
+  forall (L : language) (s : word),
+    star_lang L s ->
+    forall (a : ascii) (w : word),
+      s = a :: w ->
+      exists u v, w = u ++ v /\ L (a :: u) /\ star_lang L v.
+Proof.
+  intros L s H.
+  induction H as [| u v Lu Hv IH].
+  - (* s = [] *) intros a w Heq; discriminate Heq.
+  - (* s = u ++ v with Lu : L u and Hv : star_lang L v *)
+    intros a w Heq.
+    destruct u as [| a' u'].
+    + (* u = [] ⇒ s = v *) simpl in Heq. eapply IH; eauto.
+    + (* u = a' :: u' *)
+      simpl in Heq. inversion Heq; subst.
+      (* now a' = a and w = u' ++ v *)
+      exists u', v. repeat split; auto.
+Qed.
+(* Require Extraction.
+Extraction Language OCaml.
+Extraction "der_proof.v" star_cons_split. *)
+
+Lemma D_char_correct :
+  forall a r w, Lang (D_char a r) w <-> Lang r (a :: w).
+Proof.
+  induction r; intros w; simpl.
+  - tauto.
+  - split; [tauto| intros H; inversion H].
+  - destruct (ascii_eq_dec a a0) as [->|neq]; simpl; firstorder congruence.
+  - specialize (IHr1 w). specialize (IHr2 w). tauto.
+  - specialize (IHr1 w). specialize (IHr2 w). tauto.
+  - (* Seq *)
+    split.
+    + intros H; destruct H as [H|H].
+      * destruct H as [u [v [Hw [Hu Hv]]]]. subst w.
+        exists (a :: u), v. split; [reflexivity|].
+        split; [apply IHr1 in Hu; exact Hu | exact Hv].
+      * destruct H as [u [v [Hw [Hnu Hv]]]]. subst w.
+        unfold nu in Hnu.
+        destruct (nullable r1) eqn:En; simpl in Hnu.
+        -- apply nullable_correct in En. simpl in Hnu. subst u.
+           exists [], (a :: v). split; [reflexivity|].
+           split; [exact En | apply IHr2 in Hv; exact Hv].
+        -- contradiction.
+    + intros [u [v [Huv [Hur Hvr]]]].
+      destruct u as [|a' u'].
+      * simpl in Huv. right.
+        exists [], w. split; [reflexivity|].
+        split.
+        { unfold nu. apply (proj2 (nullable_correct r1)) in Hur. now rewrite Hur. }
+        { rewrite <- Huv in Hvr. apply IHr2. exact Hvr. }
+      * inversion Huv as [Htail]. subst a' w.
+        left. exists u', v. split; [reflexivity|].
+        split; [apply IHr1; exact Hur | exact Hvr].
+  - (* Star *)
     split.
     + (* -> *)
-      intros [Hleft | Hright].
-      * (* left branch: seq (deriv r1) r2 *)
-        rewrite denote_seq in Hleft.
-        destruct Hleft as [u [v [Hw [Hu Hv]]]]. subst w.
-        exists (sym :: u), v. repeat split; eauto.
-        -- (* ⟦r1⟧ (sym :: u) *)
-           apply IH1. exact Hu.
-        -- (* a :: (u ++ v) equals (a :: u) ++ v *)
-           reflexivity.
-      * (* right branch: nullable r1 and deriv on r2 *)
-        destruct (nullable r1) eqn:En; [|contradiction].
-        apply nullable_correct in En.
-        (* Hright : ⟦deriv_sym sym r2⟧ w *)
-        exists [], (sym :: w). repeat split; eauto.
-        -- reflexivity.
-        -- exact En.
-        -- apply IH2. exact Hright.
+      intros [u [v [Hw [Hud Hsv]]]].
+      subst w. specialize (IHr u). apply IHr in Hud.
+      change (star_lang (Lang r) ((a :: u) ++ v)).
+      apply star_app; [assumption|assumption].
     + (* <- *)
-      intros [u [v [Heq [Hr1u Hr2v]]]].
-      destruct (u) as [|x xs].
-      * (* u = []: use right branch *)
-        right.
-        assert (nullable r1 = true) as En.
-        { apply nullable_correct. simpl in Hr1u. now subst. }
-        rewrite En. simpl.
-        replace (sym :: v) with (sym :: w).
-        -- apply IH2. assumption.
-        -- now simpl in Heq.
-      * (* u = x::xs: use left branch *)
-        left.
-        (* from a::w = (x::xs) ++ v we get sym = x and w = xs ++ v *)
-        simpl in Heq. inversion Heq; subst x w.
-        rewrite denote_seq. exists xs, v. repeat split; eauto.
-        -- apply IH1. assumption.
-  - (* Star *)
-    rewrite denote_seq. simpl.
-    split.
-    + (* ->: build kstar by consing the first chunk *)
-      intros [u [v [Hw [Hdu Hkv]]]]. subst w.
-      apply IH1 in Hdu. (* ⟦r1⟧ (sym :: u) *)
-      (* Build kstar ⟦r1⟧ ((sym :: u) ++ v) = kstar ⟦r1⟧ (sym :: (u ++ v)) *)
-      remember (sym :: u) as first.
-      assert (kstar ⟦r1⟧ (first ++ v)) as Hks by (apply ks_app; assumption).
-      (* rewrite (sym :: u) ++ v = sym :: (u ++ v) *)
-      now simpl in Hks.
-    + (* <-: decompose nonempty kstar head *)
-      intro H.
-      (* from kstar ⟦r1⟧ (sym :: w) get first nonempty chunk u *)
-      destruct (kstar_cons_decomp ⟦r1⟧ sym w H)
-        as (u & v & Hnz & Hu & Hv & Heq).
-      (* u must start with sym *)
-      destruct u as [|x xs]; [contradiction|].
-      simpl in Heq. inversion Heq; subst x w.
-      (* Build the Seq witness: w = xs ++ v *)
-      exists xs, v. repeat split; eauto.
-      apply IH1. exact Hu.
+      intros Hstar.
+      edestruct (star_cons_split (Lang r) (a :: w) Hstar)
+        as [u [v [Hw' [Lu Hv']]]]; [reflexivity|].
+      exists u, v. split; [exact Hw'|].
+      split; [apply IHr; exact Lu | exact Hv'].
   - (* Neg *)
     split; intro H.
-    + (* -> : ⟦Neg (deriv_sym sym r1)⟧ w  ->  ~⟦r1⟧ (sym::w) *)
-      intro K. apply H. apply IH1. exact K.
-    + (* <- : ~⟦r1⟧ (sym::w)  ->  ⟦Neg (deriv_sym sym r1)⟧ w *)
-      intro K. apply H. apply IH1. exact K.
+    + intro Hr0. apply H. apply IHr. exact Hr0.
+    + intro Hr0. apply H. apply IHr. exact Hr0.
 Qed.
 
 
-(*** ------------------------------------------------------------- ***)
-(** * Semantic–syntactic correspondence for a word *)
-
-Theorem deriv_word_correct :
-  forall (r : regex) (u : string) (w : string),
-    ⟦deriv_word u r⟧ w <-> dlang_word u ⟦r⟧ w.
+(* Word derivative correctness by induction on u *)
+Lemma D_correct :
+  forall u r w, Lang (D u r) w <-> Lang r (u ++ w).
 Proof.
-  intros r u w.
-  revert r.
-  induction u as [|a v IHv]; intros r; simpl.
+  induction u as [| a v IHv]; intros r w; simpl.
   - tauto.
-  - (* u = a :: v *)
-    (* Use IH instantiated at r' = deriv_sym a r *)
-    rewrite (IHv (deriv_sym a r)).
-    (* Now switch both sides to the concat form with dlang_equiv *)
-    rewrite (dlang_equiv v ⟦deriv_sym a r⟧ w).
-    rewrite (dlang_equiv v (dlang_sym a ⟦r⟧) w).
-    (* Finally, apply the 1-symbol correspondence at w' = v ++ w *)
-    apply deriv_sym_correct.
+  - rewrite IHv. apply D_char_correct.
 Qed.
 
+(* ------------------------------------------------------------------ *)
+(* Regular languages and Theorem 4.1                                   *)
+(* ------------------------------------------------------------------ *)
 
+Definition regular (L : language) : Prop :=
+  exists r, forall w, Lang r w <-> L w.
 
-(*** ------------------------------------------------------------- ***)
-(** * Theorem 4.1: Derivative of a regular language is regular *)
-
-Theorem derivative_preserves_regular :
-  forall (L : language) (u : string),
-    regular L -> regular (dlang_word u L).
+(* helper: semantics of dlang *)
+Lemma dlang_correct :
+  forall (u : word) (L : language) (w : word),
+    dlang u L w <-> L (u ++ w).
 Proof.
-  intros L u [r Hr].              (* L ≡ ⟦r⟧ *)
-  exists (deriv_word u r). intro w.
-  rewrite deriv_word_correct.     (* ⟦D_u r⟧ w <-> dlang_word u ⟦r⟧ w *)
-  (* Replace ⟦r⟧ using regularity witness Hr *)
-  revert r Hr. induction u as [|a v IHv]; simpl; intros r Hr; [apply Hr|].
-  apply IHv. intros w0. specialize (Hr (a :: w0)). exact Hr.
+  induction u as [|a v IHv]; intros L w; simpl.
+  - tauto.
+  - rewrite IHv. unfold dlang_char. simpl. tauto.
 Qed.
 
-(** Alternate statement matching the “prefix-removal” definition:
-    ∂_u(L) = { w | u ++ w ∈ L } is regular. *)
-Corollary derivative_of_regular_is_regular_concat :
-  forall (L : language) (u : string),
-    regular L -> regular (dlang_word_concat u L).
+Theorem derivative_regular :
+  forall (L : language) (u : word),
+    regular L -> regular (dlang u L).
 Proof.
-  intros L u Hreg.
-  destruct (derivative_preserves_regular L u Hreg) as [r Hr].
-  exists r. intro w. rewrite <- dlang_equiv. apply Hr.
+  intros L u [r Hr].
+  exists (D u r). intro w.
+  split.
+  - (* -> *)
+    intro H.                             (* Lang (D u r) w *)
+    apply D_correct in H.                (* Lang r (u ++ w) *)
+    apply (proj1 (Hr (u ++ w))) in H.    (* L (u ++ w) *)
+    apply (proj2 (dlang_correct u L w)); exact H.
+  - (* <- *)
+    intro H.                             (* dlang u L w *)
+    apply (proj1 (dlang_correct u L w)) in H.  (* L (u ++ w) *)
+    apply (proj2 (Hr (u ++ w))) in H.          (* Lang r (u ++ w) *)
+    apply D_correct; exact H.                  (* Lang (D u r) w *)
 Qed.
