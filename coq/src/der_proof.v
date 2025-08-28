@@ -211,8 +211,6 @@ Proof.
       * reflexivity.
 Qed.
 
-
-
 (* ------------------------------------------------------------------ *)
 (* Correctness of derivatives                                          *)
 (* ------------------------------------------------------------------ *)
@@ -246,9 +244,7 @@ Proof.
       (* now a' = a and w = u' ++ v *)
       exists u', v. repeat split; auto.
 Qed.
-(* Require Extraction.
-Extraction Language OCaml.
-Extraction "der_proof.v" star_cons_split. *)
+(*  *)
 
 Lemma D_char_correct :
   forall a r w, Lang (D_char a r) w <-> Lang r (a :: w).

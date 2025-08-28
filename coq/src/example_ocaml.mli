@@ -18,21 +18,16 @@ module Nat :
   val leb : nat -> nat -> bool
  end
 
-module Example :
- sig
-  val add1 : nat -> nat
+val add1 : nat -> nat
 
-  val sum : nat list -> nat
+val sum : nat list -> nat
 
-  val map : ('a1 -> 'a2) -> 'a1 list -> 'a2 list
+val map : ('a1 -> 'a2) -> 'a1 list -> 'a2 list
 
-  val inc_all : nat list -> nat list
+val inc_all : nat list -> nat list
 
-  val evenb : nat -> bool
+val evenb : nat -> bool
 
-  type person = { pid : nat; age : nat }
+type person = { pid : nat; age : nat }
 
-  val age : person -> nat
-
-  val can_vote : person -> bool
- end
+val can_vote : person -> bool
